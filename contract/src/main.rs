@@ -12,7 +12,9 @@ use alloc::{
     string::{String, ToString},
     str,
     format,
-    vec, vec::Vec};
+    vec, vec::Vec,
+    collections::BTreeMap
+};
 
 use core::convert::TryInto;
 
@@ -25,14 +27,18 @@ use casper_types::{
     system::CallStackElement,
     bytesrepr::ToBytes,
     ApiError, Key, CLType, CLTyped, Parameter, U512};
+use casper_types_derive::{CLTyped, FromBytes, ToBytes};
+
 // use casper_types::{ApiError, contracts::NamedKeys, U512, Key, ContractHash, URef, CLTyped, bytesrepr::FromBytes, runtime_args, RuntimeArgs, system::CallStackElement};
 
 const MAKE_OFFER: &str = "make_offer";
 const CREATE_LISTING: &str = "create_listing";
+const FIND_PRICE: &str = "find_price";
 
 const KEY_NAME: &str = "bidder";
+const KEY_PRICE: &str = "price";
 
-const LISTING_DICTIONARY: &str = "listing_id_dictionary";
+const LISTING_DICTIONARY: &str = "listing_id_dictionary"; //TODO: rename to listings?
 const NFT_CONTRACT_HASH_ARG: &str = "token_contract_hash";
 const TOKEN_ID_ARG: &str = "token_id";
 const PRICE_ARG: &str = "price";
@@ -54,13 +60,15 @@ impl From<Error> for ApiError {
     }
 }
 
+#[derive(CLTyped, ToBytes, FromBytes)]
+struct Listing {
+    seller: Key,
+    token_contract: Key,
+    token_id: String,
+    price: U512
+}
 
-// fn get_id(token_contract: &String, token_id: &String) -> String {
 fn get_id<T: CLTyped + ToBytes>(token_contract: &T, token_id: &T) -> String {
-    // let hash: [u8; 32] = runtime::blake2b(format!("{}{}", token_contract, token_id));
-    // // TODO: should we remove the replace & leave hash- ?
-    // return Key::Hash(hash).to_formatted_string().replace("hash-", "");
-
     let mut bytes_a = token_contract.to_bytes().unwrap_or_revert();
     let mut bytes_b = token_id.to_bytes().unwrap_or_revert();
 
@@ -68,14 +76,6 @@ fn get_id<T: CLTyped + ToBytes>(token_contract: &T, token_id: &T) -> String {
 
     let bytes = runtime::blake2b(bytes_a);
     hex::encode(bytes)
-
-    // attempt to get the String directly but Keys.rs uses base16 - https://docs.rs/casper-types/1.4.6/src/casper_types/key.rs.html#240-280 (to_formatted_string)
-    // so I think need to include base16 crate. This https://stackoverflow.com/questions/50435553/convert-u8-to-string gives errors
-    // I think it's due to the bytes given so may not be possible for our [u8; 32] situation
-    // 
-    // let val: String = str::from_utf8(&hash).unwrap().to_string();
-    // let val: String = format!("{}", base16::encode_lower(&hash));
-    // let val: String = String::from_utf8(hash.to_vec()).unwrap();
 }
 
 #[no_mangle]
@@ -91,13 +91,23 @@ pub extern "C" fn create_listing() -> () {
 
     let listing_id: String = get_id(&token_contract_string, &token_id);
 
+    let listing = Listing {
+        token_contract: token_contract_hash,
+        token_id: token_id,
+        price: price,
+        seller: token_owner
+    };
+
     // The key shouldn't already exist in the named keys.
     // let missing_key = runtime::get_key(KEY_NAME);
     // if missing_key.is_some() {
     //     runtime::revert(Error::KeyAlreadyExists);
     // }
 
-    // let listing_id = toke_contract_hash + token_id
+    let mut bids: BTreeMap<i32, (&str, i32)> = BTreeMap::new();
+    bids.insert(134,("num1", 10));
+    bids.insert(256,("num2", 27));
+    bids.insert(789,("num1", 100));
 
     let dictionary_uref = match runtime::get_key(LISTING_DICTIONARY) {
         Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
@@ -109,50 +119,7 @@ pub extern "C" fn create_listing() -> () {
     //         .unwrap_or_revert()
     //         .unwrap_or_default()
     // {
-        storage::dictionary_put(dictionary_uref, &listing_id, token_id);
-    // }
-
-
-    // match runtime::get_key(LISTING_DICTIONARY) {
-    //     Some(key) => {
-    //         let dict_uref = key.try_into().unwrap_or_revert();
-    //         // storage::write(key_ref, listing_id);
-    //         storage::dictionary_put(dict_uref, &listing_id, token_id);
-    //     }
-    //     None => {
-    //         let dict_uref = storage::new_dictionary(LISTING_DICTIONARY).unwrap();
-    //         storage::dictionary_put(dict_uref, &listing_id, token_id);
-    //         runtime::put_key(LISTING_DICTIONARY, dict_uref);
-    //     }
-    // }
-
-    // match runtime::get_key(LISTING_ID) {
-    //     Some(key) => {
-    //         let key_ref = key.try_into().unwrap_or_revert();
-    //         storage::write(key_ref, listing_id);
-    //     }
-    //     None => {
-    //         let key = storage::new_uref(listing_id).into();
-    //         runtime::put_key(LISTING_ID, key);
-    //     }
-    // }
-
-    // This contract expects a single runtime argument to be provided.  The arg is named "message"
-    // and will be of type `String`.
-    // let value: String = runtime::get_named_arg(RUNTIME_ARG_NAME);
-
-    // Store this value under a new unforgeable reference a.k.a `URef`.
-    // let bidder_ref = storage::new_uref(bidder);
-
-    // Store the new `URef` as a named key with a name of `KEY_NAME`.
-    // let key = Key::URef(bidder_ref);
-    // runtime::put_key(KEY_NAME, key);
-
-    // The key should now be able to be retrieved.  Note that if `get_key()` returns `None`, then
-    // `unwrap_or_revert()` will exit the process, returning `ApiError::None`.
-    // let retrieved_key = runtime::get_key(KEY_NAME).unwrap_or_revert();
-    // if retrieved_key != key {
-    //     runtime::revert(Error::KeyMismatch);`
+        storage::dictionary_put(dictionary_uref, &listing_id, listing);//(10,"test", bids));
     // }
 }
 
@@ -172,6 +139,34 @@ fn get_bidder() -> Key {
     };
 
     return bidder;
+}
+
+
+#[no_mangle]
+pub extern "C" fn find_price() -> () {
+    let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
+    let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
+
+    let listing_id: String = get_id(&token_contract_string, &token_id);
+    let dictionary_uref = match runtime::get_key(LISTING_DICTIONARY) {
+        Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
+        None => storage::new_dictionary(LISTING_DICTIONARY).unwrap_or_revert(),
+    };
+
+    let listing: Listing = storage::dictionary_get(dictionary_uref, &listing_id)
+        .unwrap()
+        .unwrap();
+
+    match runtime::get_key(KEY_PRICE) {
+        Some(key) => {
+            let key_ref = key.try_into().unwrap_or_revert();
+            storage::write(key_ref, listing.price);
+        }
+        None => {
+            let key = storage::new_uref(listing.price).into();
+            runtime::put_key(KEY_PRICE, key);
+        }
+    }
 }
 
 #[no_mangle]
@@ -230,6 +225,7 @@ pub extern "C" fn call() {
     let mut market_entry_points = EntryPoints::new();
     market_entry_points.add_entry_point(endpoint(MAKE_OFFER));
     market_entry_points.add_entry_point(endpoint(CREATE_LISTING));
+    market_entry_points.add_entry_point(endpoint(FIND_PRICE));
 
     // market_entry_points.add_entry_point(EntryPoint::new(
     //     MAKE_OFFER,
