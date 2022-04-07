@@ -26,7 +26,8 @@ use casper_types::{
     contracts::{EntryPoint, EntryPointAccess, EntryPointType, EntryPoints},
     system::CallStackElement,
     bytesrepr::ToBytes,
-    ApiError, Key, CLType, CLTyped, Parameter, U512};
+    runtime_args, RuntimeArgs,
+    ApiError, Key, ContractHash, CLType, CLTyped, Parameter, U256, U512};
 use casper_types_derive::{CLTyped, FromBytes, ToBytes};
 
 // use casper_types::{ApiError, contracts::NamedKeys, U512, Key, ContractHash, URef, CLTyped, bytesrepr::FromBytes, runtime_args, RuntimeArgs, system::CallStackElement};
@@ -34,6 +35,7 @@ use casper_types_derive::{CLTyped, FromBytes, ToBytes};
 const MAKE_OFFER: &str = "make_offer";
 const CREATE_LISTING: &str = "create_listing";
 const FIND_PRICE: &str = "find_price";
+const BUY_LISTING: &str = "buy_listing";
 
 const KEY_NAME: &str = "bidder";
 const KEY_PRICE: &str = "price";
@@ -63,7 +65,7 @@ impl From<Error> for ApiError {
 #[derive(CLTyped, ToBytes, FromBytes)]
 struct Listing {
     seller: Key,
-    token_contract: Key,
+    token_contract: ContractHash,
     token_id: String,
     price: U512
 }
@@ -85,7 +87,7 @@ pub extern "C" fn create_listing() -> () {
 
     // let token_contract_hash: Key = Key::Hash(runtime::get_named_arg::<Key>(NFT_CONTRACT_HASH_ARG).into_hash().unwrap_or_revert());
     let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
-    let token_contract_hash: Key = Key::from_formatted_str(&token_contract_string).unwrap();
+    let token_contract_hash: ContractHash = ContractHash::from_formatted_str(&token_contract_string).unwrap();
     let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
     let price: U512 = runtime::get_named_arg(PRICE_ARG);
 
@@ -98,29 +100,12 @@ pub extern "C" fn create_listing() -> () {
         seller: token_owner
     };
 
-    // The key shouldn't already exist in the named keys.
-    // let missing_key = runtime::get_key(KEY_NAME);
-    // if missing_key.is_some() {
-    //     runtime::revert(Error::KeyAlreadyExists);
-    // }
-
-    let mut bids: BTreeMap<i32, (&str, i32)> = BTreeMap::new();
-    bids.insert(134,("num1", 10));
-    bids.insert(256,("num2", 27));
-    bids.insert(789,("num1", 100));
-
     let dictionary_uref = match runtime::get_key(LISTING_DICTIONARY) {
         Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
         None => storage::new_dictionary(LISTING_DICTIONARY).unwrap_or_revert(),
     };
-    // let score: U512 = runtime::get_named_arg("score");
-    // if score
-    //     > storage::dictionary_get::<U512>(dictionary_uref, &get_caller().to_string())
-    //         .unwrap_or_revert()
-    //         .unwrap_or_default()
-    // {
-        storage::dictionary_put(dictionary_uref, &listing_id, listing);//(10,"test", bids));
-    // }
+
+    storage::dictionary_put(dictionary_uref, &listing_id, listing);
 }
 
 fn get_bidder() -> Key {
@@ -167,6 +152,45 @@ pub extern "C" fn find_price() -> () {
             runtime::put_key(KEY_PRICE, key);
         }
     }
+}
+
+fn token_id_to_vec(token_id: &str) -> Vec<U256> {
+    let token_id: U256 = U256::from_str_radix(&token_id, 10).unwrap();
+    vec![token_id]
+}
+
+// TODO: Consider refactoring and combining with named arg creation to avoid duplicating host side function calls
+// pub fn auction_receive_token(auction_key: Key) -> () {
+#[no_mangle]
+pub fn buy_listing() -> () {
+    let buyer = Key::Account(runtime::get_caller());
+
+    let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
+    let token_contract_hash: ContractHash = ContractHash::from_formatted_str(&token_contract_string).unwrap();
+    // // let token_ids = runtime::get_named_arg::<Vec<U256>>("token_ids");
+    let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
+
+    // TODO: replace with a getter function
+    let listing_id: String = get_id(&token_contract_string, &token_id);
+    let dictionary_uref = match runtime::get_key(LISTING_DICTIONARY) {
+        Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
+        None => storage::new_dictionary(LISTING_DICTIONARY).unwrap_or_revert(),
+    };
+
+    let listing: Listing = storage::dictionary_get(dictionary_uref, &listing_id)
+        .unwrap()
+        .unwrap();
+    let token_ids: Vec<U256> = token_id_to_vec(&token_id);
+
+    runtime::call_contract(
+        token_contract_hash,
+        "transfer_from",
+        runtime_args! {
+            "sender" => listing.seller,
+            "recipient" => buyer,
+            "token_ids" => token_ids,
+          }
+    )
 }
 
 #[no_mangle]
@@ -226,6 +250,7 @@ pub extern "C" fn call() {
     market_entry_points.add_entry_point(endpoint(MAKE_OFFER));
     market_entry_points.add_entry_point(endpoint(CREATE_LISTING));
     market_entry_points.add_entry_point(endpoint(FIND_PRICE));
+    market_entry_points.add_entry_point(endpoint(BUY_LISTING));
 
     // market_entry_points.add_entry_point(EntryPoint::new(
     //     MAKE_OFFER,
@@ -243,7 +268,8 @@ pub extern "C" fn call() {
         storage::add_contract_version(contract_package_hash, market_entry_points, Default::default());
     runtime::put_key("market_contract", contract_hash.into());
     let contract_hash_pack = storage::new_uref(contract_hash);
-    runtime::put_key("market_contract_hash", contract_hash_pack.into())
+    runtime::put_key("market_contract_hash", contract_hash_pack.into());
+    runtime::put_key("market_contract_package_hash", contract_package_hash.into());
 }
 
 fn endpoint(name: &str) -> EntryPoint {
