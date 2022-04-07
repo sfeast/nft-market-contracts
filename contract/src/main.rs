@@ -9,17 +9,15 @@ compile_error!("target arch should be wasm32: compile with '--target wasm32-unkn
 extern crate alloc;
 
 use alloc::{
-    string::{String, ToString},
+    string::String,
     str,
-    format,
-    vec, vec::Vec,
-    collections::BTreeMap
+    vec, vec::Vec
 };
 
 use core::convert::TryInto;
 
 use casper_contract::{
-    contract_api::{runtime, storage},
+    contract_api::{runtime, storage, system},
     unwrap_or_revert::UnwrapOrRevert,
 };
 use casper_types::{
@@ -27,7 +25,7 @@ use casper_types::{
     system::CallStackElement,
     bytesrepr::ToBytes,
     runtime_args, RuntimeArgs,
-    ApiError, Key, ContractHash, CLType, CLTyped, Parameter, U256, U512};
+    ApiError, Key, URef, ContractHash, CLType, CLTyped, U256, U512};
 use casper_types_derive::{CLTyped, FromBytes, ToBytes};
 
 // use casper_types::{ApiError, contracts::NamedKeys, U512, Key, ContractHash, URef, CLTyped, bytesrepr::FromBytes, runtime_args, RuntimeArgs, system::CallStackElement};
@@ -37,13 +35,14 @@ const CREATE_LISTING: &str = "create_listing";
 const FIND_PRICE: &str = "find_price";
 const BUY_LISTING: &str = "buy_listing";
 
-const KEY_NAME: &str = "bidder";
+// const KEY_NAME: &str = "bidder";
 const KEY_PRICE: &str = "price";
 
 const LISTING_DICTIONARY: &str = "listing_id_dictionary"; //TODO: rename to listings?
 const NFT_CONTRACT_HASH_ARG: &str = "token_contract_hash";
 const TOKEN_ID_ARG: &str = "token_id";
 const PRICE_ARG: &str = "price";
+const BUYER_PURSE_ARG: &str = "purse";
 
 
 const ERROR_INVALID_CALLER: u16 = 1;
@@ -52,8 +51,8 @@ const ERROR_INVALID_CALLER: u16 = 1;
 /// An error enum which can be converted to a `u16` so it can be returned as an `ApiError::User`.
 #[repr(u16)]
 enum Error {
-    KeyAlreadyExists = 0,
-    KeyMismatch = 1,
+    ListingDoesNotExist = 0,
+    BalanceInsufficient = 1
 }
 
 impl From<Error> for ApiError {
@@ -80,10 +79,47 @@ fn get_id<T: CLTyped + ToBytes>(token_contract: &T, token_id: &T) -> String {
     hex::encode(bytes)
 }
 
+fn get_bidder() -> Key {
+    // Figure out who is trying to bid and what their bid is
+    let mut call_stack = runtime::get_call_stack();
+    call_stack.pop();
+
+    //if session { () } else { call_stack.pop(); () };
+
+    let caller: CallStackElement = call_stack.last().unwrap_or_revert().clone();
+    // TODO: Contracts should probably be disallowed, since they can't be verified by Civic in a meaningful way
+    let bidder = match caller {
+        CallStackElement::Session { account_hash: account_hash_caller} => Key::Account(account_hash_caller),
+        CallStackElement::StoredContract { contract_package_hash: _, contract_hash: contract_hash_addr_caller} => Key::Hash(contract_hash_addr_caller.value()),
+        _ => runtime::revert(ApiError::User(ERROR_INVALID_CALLER)),
+    };
+
+    return bidder;
+}
+
+// writeVal( String::from("stuff it xxx !!!");)
+// fn writeVal(value: U512) -> () {
+// fn write_val(value: String) -> () {
+//     match runtime::get_key(KEY_NAME) {
+//         Some(key) => {
+//             let key_ref = key.try_into().unwrap_or_revert();
+//             storage::write(key_ref, value);
+//         }
+//         None => {
+//             let key = storage::new_uref(value).into();
+//             runtime::put_key(KEY_NAME, key);
+//         }
+//     }
+// }
+
+fn token_id_to_vec(token_id: &str) -> Vec<U256> {
+    let token_id: U256 = U256::from_str_radix(&token_id, 10).unwrap();
+    vec![token_id]
+}
+
 #[no_mangle]
 pub extern "C" fn create_listing() -> () {
     let token_owner = Key::Account(runtime::get_caller());
-    // TODO: check that it actually is the token owner - otherwise anyone can list someones token for any price
 
     // let token_contract_hash: Key = Key::Hash(runtime::get_named_arg::<Key>(NFT_CONTRACT_HASH_ARG).into_hash().unwrap_or_revert());
     let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
@@ -108,24 +144,59 @@ pub extern "C" fn create_listing() -> () {
     storage::dictionary_put(dictionary_uref, &listing_id, listing);
 }
 
-fn get_bidder() -> Key {
-    // Figure out who is trying to bid and what their bid is
-    let mut call_stack = runtime::get_call_stack();
-    call_stack.pop();
+// TODO: Consider refactoring and combining with named arg creation to avoid duplicating host side function calls
+#[no_mangle]
+pub fn buy_listing() -> () {
+    let buyer = Key::Account(runtime::get_caller());
 
-    //if session { () } else { call_stack.pop(); () };
+    let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
+    let token_contract_hash: ContractHash = ContractHash::from_formatted_str(&token_contract_string).unwrap();
 
-    let caller: CallStackElement = call_stack.last().unwrap_or_revert().clone();
-    // TODO: Contracts should probably be disallowed, since they can't be verified by Civic in a meaningful way
-    let bidder = match caller {
-        CallStackElement::Session { account_hash: account_hash_caller} => Key::Account(account_hash_caller),
-        CallStackElement::StoredContract { contract_package_hash: _, contract_hash: contract_hash_addr_caller} => Key::Hash(contract_hash_addr_caller.value()),
-        _ => runtime::revert(ApiError::User(ERROR_INVALID_CALLER)),
+    let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
+    let token_ids: Vec<U256> = token_id_to_vec(&token_id);
+
+    // // TODO: replace with a getter function
+    let listing_id: String = get_id(&token_contract_string, &token_id);
+    let dictionary_uref = match runtime::get_key(LISTING_DICTIONARY) {
+        Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
+        None => storage::new_dictionary(LISTING_DICTIONARY).unwrap_or_revert(),
     };
 
-    return bidder;
+    let listing: Listing = storage::dictionary_get(dictionary_uref, &listing_id)
+        .unwrap()
+        .unwrap_or_revert_with(Error::ListingDoesNotExist);
+
+    let buyer_purse: URef = runtime::get_named_arg(BUYER_PURSE_ARG);
+    let purse_balance: U512 = system::get_purse_balance(buyer_purse).unwrap();
+
+    if purse_balance < listing.price {
+        runtime::revert(Error::BalanceInsufficient);
+    }
+
+    system::transfer_from_purse_to_account(
+        buyer_purse,
+        listing.seller.into_account().unwrap_or_revert(),
+        listing.price,
+        None
+    ).unwrap_or_revert();
+
+    runtime::call_contract(
+        token_contract_hash,
+        "transfer_from",
+        runtime_args! {
+            "sender" => listing.seller,
+            "recipient" => buyer,
+            "token_ids" => token_ids,
+          }
+    )
+
+    // TODO: remove listing
 }
 
+#[no_mangle]
+pub extern "C" fn make_offer() -> () {
+    let _bidder= get_bidder().into_account().unwrap_or_revert_with(ApiError::User(ERROR_INVALID_CALLER));
+}
 
 #[no_mangle]
 pub extern "C" fn find_price() -> () {
@@ -152,85 +223,6 @@ pub extern "C" fn find_price() -> () {
             runtime::put_key(KEY_PRICE, key);
         }
     }
-}
-
-fn token_id_to_vec(token_id: &str) -> Vec<U256> {
-    let token_id: U256 = U256::from_str_radix(&token_id, 10).unwrap();
-    vec![token_id]
-}
-
-// TODO: Consider refactoring and combining with named arg creation to avoid duplicating host side function calls
-// pub fn auction_receive_token(auction_key: Key) -> () {
-#[no_mangle]
-pub fn buy_listing() -> () {
-    let buyer = Key::Account(runtime::get_caller());
-
-    let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
-    let token_contract_hash: ContractHash = ContractHash::from_formatted_str(&token_contract_string).unwrap();
-    // // let token_ids = runtime::get_named_arg::<Vec<U256>>("token_ids");
-    let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
-
-    // TODO: replace with a getter function
-    let listing_id: String = get_id(&token_contract_string, &token_id);
-    let dictionary_uref = match runtime::get_key(LISTING_DICTIONARY) {
-        Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
-        None => storage::new_dictionary(LISTING_DICTIONARY).unwrap_or_revert(),
-    };
-
-    let listing: Listing = storage::dictionary_get(dictionary_uref, &listing_id)
-        .unwrap()
-        .unwrap();
-    let token_ids: Vec<U256> = token_id_to_vec(&token_id);
-
-    runtime::call_contract(
-        token_contract_hash,
-        "transfer_from",
-        runtime_args! {
-            "sender" => listing.seller,
-            "recipient" => buyer,
-            "token_ids" => token_ids,
-          }
-    )
-}
-
-#[no_mangle]
-pub extern "C" fn make_offer() -> () {
-    let bidder= get_bidder().into_account().unwrap_or_revert_with(ApiError::User(ERROR_INVALID_CALLER));
-
-    // The key shouldn't already exist in the named keys.
-    // let missing_key = runtime::get_key(KEY_NAME);
-    // if missing_key.is_some() {
-    //     runtime::revert(Error::KeyAlreadyExists);
-    // }
-
-    match runtime::get_key(KEY_NAME) {
-        Some(key) => {
-            let key_ref = key.try_into().unwrap_or_revert();
-            storage::write(key_ref, bidder);
-        }
-        None => {
-            let key = storage::new_uref(bidder).into();
-            runtime::put_key(KEY_NAME, key);
-        }
-    }
-
-    // This contract expects a single runtime argument to be provided.  The arg is named "message"
-    // and will be of type `String`.
-    // let value: String = runtime::get_named_arg(RUNTIME_ARG_NAME);
-
-    // Store this value under a new unforgeable reference a.k.a `URef`.
-    // let bidder_ref = storage::new_uref(bidder);
-
-    // Store the new `URef` as a named key with a name of `KEY_NAME`.
-    // let key = Key::URef(bidder_ref);
-    // runtime::put_key(KEY_NAME, key);
-
-    // The key should now be able to be retrieved.  Note that if `get_key()` returns `None`, then
-    // `unwrap_or_revert()` will exit the process, returning `ApiError::None`.
-    // let retrieved_key = runtime::get_key(KEY_NAME).unwrap_or_revert();
-    // if retrieved_key != key {
-    //     runtime::revert(Error::KeyMismatch);`
-    // }
 }
 
 #[no_mangle]
