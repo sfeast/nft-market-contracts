@@ -37,7 +37,7 @@ pub const EVENT_TYPE: &str = "event_type";
 pub const CONTRACT_PACKAGE_HASH: &str = "contract_package_hash";
 pub const SELLER: &str = "seller";
 pub const BUYER: &str = "buyer";
-pub const TOKEN_CONTRACT: &str = "contract";
+pub const TOKEN_CONTRACT: &str = "token_contract";
 pub const TOKEN_ID: &str = "token_id";
 pub const PRICE: &str = "price";
 
