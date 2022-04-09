@@ -25,15 +25,30 @@ use casper_types::{
     system::CallStackElement,
     bytesrepr::ToBytes,
     runtime_args, RuntimeArgs,
-    ApiError, Key, URef, ContractHash, CLType, CLTyped, U256, U512};
+    ApiError, Key, URef, ContractHash, ContractPackageHash, CLType, CLTyped, U256, U512};
 use casper_types_derive::{CLTyped, FromBytes, ToBytes};
+// use casper_types::{contracts::NamedKeys};
 
-// use casper_types::{ApiError, contracts::NamedKeys, U512, Key, ContractHash, URef, CLTyped, bytesrepr::FromBytes, runtime_args, RuntimeArgs, system::CallStackElement};
+use event::{emit, MarketEvent};
+
+mod event;
+
+pub const EVENT_TYPE: &str = "event_type";
+pub const CONTRACT_PACKAGE_HASH: &str = "contract_package_hash";
+pub const SELLER: &str = "seller";
+pub const BUYER: &str = "buyer";
+pub const TOKEN_CONTRACT: &str = "contract";
+pub const TOKEN_ID: &str = "token_id";
+pub const PRICE: &str = "price";
+
+const CONTRACT_HASH: &str = "market_contract_hash";
+const CONTRACT_PACKAGE_HASH_NAME: &str = "market_contract_package_hash";
 
 const MAKE_OFFER: &str = "make_offer";
 const CREATE_LISTING: &str = "create_listing";
 const FIND_PRICE: &str = "find_price";
 const BUY_LISTING: &str = "buy_listing";
+const CANCEL_LISTING: &str = "cancel_listing";
 
 // const KEY_NAME: &str = "bidder";
 const KEY_PRICE: &str = "price";
@@ -44,7 +59,6 @@ const TOKEN_ID_ARG: &str = "token_id";
 const PRICE_ARG: &str = "price";
 const BUYER_PURSE_ARG: &str = "purse";
 
-
 const ERROR_INVALID_CALLER: u16 = 1;
 
 
@@ -52,7 +66,9 @@ const ERROR_INVALID_CALLER: u16 = 1;
 #[repr(u16)]
 enum Error {
     ListingDoesNotExist = 0,
-    BalanceInsufficient = 1
+    ListingCanceledOrSold = 1,
+    BalanceInsufficient = 2,
+    PermissionDenied = 3
 }
 
 impl From<Error> for ApiError {
@@ -67,6 +83,20 @@ struct Listing {
     token_contract: ContractHash,
     token_id: String,
     price: U512
+}
+
+// TODO: what does this do - overkill??
+fn contract_package_hash() -> ContractPackageHash {
+    let call_stacks = runtime::get_call_stack();
+    let last_entry = call_stacks.last().unwrap_or_revert();
+    let package_hash: Option<ContractPackageHash> = match last_entry {
+        CallStackElement::StoredContract {
+            contract_package_hash,
+            contract_hash: _,
+        } => Some(*contract_package_hash),
+        _ => None,
+    };
+    package_hash.unwrap_or_revert()
 }
 
 fn get_id<T: CLTyped + ToBytes>(token_contract: &T, token_id: &T) -> String {
@@ -121,17 +151,29 @@ fn token_id_to_vec(token_id: &str) -> Vec<U256> {
 pub extern "C" fn create_listing() -> () {
     let token_owner = Key::Account(runtime::get_caller());
 
-    // let token_contract_hash: Key = Key::Hash(runtime::get_named_arg::<Key>(NFT_CONTRACT_HASH_ARG).into_hash().unwrap_or_revert());
     let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
     let token_contract_hash: ContractHash = ContractHash::from_formatted_str(&token_contract_string).unwrap();
     let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
     let price: U512 = runtime::get_named_arg(PRICE_ARG);
 
+    let verified_owner =
+        runtime::call_contract::<Option<Key>>(
+            token_contract_hash,
+            "owner_of",
+            runtime_args! {
+                "token_id" => U256::from_dec_str(&token_id).unwrap()
+              }
+        );
+
+    if token_owner != verified_owner.unwrap() {
+        runtime::revert(Error::PermissionDenied);
+    }
+
     let listing_id: String = get_id(&token_contract_string, &token_id);
 
     let listing = Listing {
         token_contract: token_contract_hash,
-        token_id: token_id,
+        token_id: token_id.clone(),
         price: price,
         seller: token_owner
     };
@@ -142,9 +184,30 @@ pub extern "C" fn create_listing() -> () {
     };
 
     storage::dictionary_put(dictionary_uref, &listing_id, listing);
+
+    emit(&MarketEvent::ListingCreated {
+        package: contract_package_hash(),
+        seller: token_owner,
+        token_contract: token_contract_string,
+        token_id: token_id,
+        price: price
+    })
 }
 
-// TODO: Consider refactoring and combining with named arg creation to avoid duplicating host side function calls
+fn get_listing(listing_id: &str) -> (Listing, URef) {
+    let dictionary_uref = match runtime::get_key(LISTING_DICTIONARY) {
+        Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
+        None => storage::new_dictionary(LISTING_DICTIONARY).unwrap_or_revert(),
+    };
+
+    let listing = match storage::dictionary_get(dictionary_uref, &listing_id) {
+        Ok(value) => value.unwrap_or_revert_with(Error::ListingDoesNotExist),
+        Err(_error) => runtime::revert(Error::ListingCanceledOrSold),
+    };
+
+    (listing, dictionary_uref)
+}
+
 #[no_mangle]
 pub fn buy_listing() -> () {
     let buyer = Key::Account(runtime::get_caller());
@@ -155,16 +218,8 @@ pub fn buy_listing() -> () {
     let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
     let token_ids: Vec<U256> = token_id_to_vec(&token_id);
 
-    // // TODO: replace with a getter function
     let listing_id: String = get_id(&token_contract_string, &token_id);
-    let dictionary_uref = match runtime::get_key(LISTING_DICTIONARY) {
-        Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
-        None => storage::new_dictionary(LISTING_DICTIONARY).unwrap_or_revert(),
-    };
-
-    let listing: Listing = storage::dictionary_get(dictionary_uref, &listing_id)
-        .unwrap()
-        .unwrap_or_revert_with(Error::ListingDoesNotExist);
+    let (listing, dictionary_uref) = get_listing(&listing_id);
 
     let buyer_purse: URef = runtime::get_named_arg(BUYER_PURSE_ARG);
     let purse_balance: U512 = system::get_purse_balance(buyer_purse).unwrap();
@@ -180,7 +235,7 @@ pub fn buy_listing() -> () {
         None
     ).unwrap_or_revert();
 
-    runtime::call_contract(
+    runtime::call_contract::<()>(
         token_contract_hash,
         "transfer_from",
         runtime_args! {
@@ -188,9 +243,41 @@ pub fn buy_listing() -> () {
             "recipient" => buyer,
             "token_ids" => token_ids,
           }
-    )
+    );
 
-    // TODO: remove listing
+    storage::dictionary_put(dictionary_uref, &listing_id, None::<Listing>);
+
+    emit(&MarketEvent::ListingPurchased {
+        package: contract_package_hash(),
+        seller: listing.seller,
+        buyer: buyer,
+        token_contract: token_contract_string,
+        token_id: token_id,
+        price: listing.price
+    })
+}
+
+#[no_mangle]
+pub fn cancel_listing() -> () {
+    let caller = Key::Account(runtime::get_caller());
+
+    let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
+    let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
+
+    let listing_id: String = get_id(&token_contract_string, &token_id);
+    let (listing, dictionary_uref) = get_listing(&listing_id);
+
+    if caller != listing.seller {
+        runtime::revert(Error::PermissionDenied);
+    }
+
+    storage::dictionary_put(dictionary_uref, &listing_id, None::<Listing>);
+
+    emit(&MarketEvent::ListingCanceled {
+        package: contract_package_hash(),
+        token_contract: token_contract_string,
+        token_id: token_id
+    })
 }
 
 #[no_mangle]
@@ -243,6 +330,7 @@ pub extern "C" fn call() {
     market_entry_points.add_entry_point(endpoint(CREATE_LISTING));
     market_entry_points.add_entry_point(endpoint(FIND_PRICE));
     market_entry_points.add_entry_point(endpoint(BUY_LISTING));
+    market_entry_points.add_entry_point(endpoint(CANCEL_LISTING));
 
     // market_entry_points.add_entry_point(EntryPoint::new(
     //     MAKE_OFFER,
@@ -258,10 +346,10 @@ pub extern "C" fn call() {
 
     let (contract_hash, _) =
         storage::add_contract_version(contract_package_hash, market_entry_points, Default::default());
-    runtime::put_key("market_contract", contract_hash.into());
+    runtime::put_key(CONTRACT_HASH, contract_hash.into());
     let contract_hash_pack = storage::new_uref(contract_hash);
-    runtime::put_key("market_contract_hash", contract_hash_pack.into());
-    runtime::put_key("market_contract_package_hash", contract_package_hash.into());
+    runtime::put_key("market_contract_hash_wrapped", contract_hash_pack.into());
+    runtime::put_key(CONTRACT_PACKAGE_HASH_NAME, contract_package_hash.into());
 }
 
 fn endpoint(name: &str) -> EntryPoint {
