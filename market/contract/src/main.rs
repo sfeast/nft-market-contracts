@@ -142,6 +142,16 @@ fn get_bidder() -> Key {
 //     }
 // }
 
+fn get_token_owner(token_contract_hash: ContractHash, token_id: &str) -> Option<Key> {
+    runtime::call_contract::<Option<Key>>(
+        token_contract_hash,
+        "owner_of",
+        runtime_args! {
+            "token_id" => U256::from_dec_str(&token_id).unwrap()
+          }
+    )
+}
+
 fn token_id_to_vec(token_id: &str) -> Vec<U256> {
     let token_id: U256 = U256::from_str_radix(&token_id, 10).unwrap();
     vec![token_id]
@@ -156,16 +166,7 @@ pub extern "C" fn create_listing() -> () {
     let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
     let price: U512 = runtime::get_named_arg(PRICE_ARG);
 
-    let verified_owner =
-        runtime::call_contract::<Option<Key>>(
-            token_contract_hash,
-            "owner_of",
-            runtime_args! {
-                "token_id" => U256::from_dec_str(&token_id).unwrap()
-              }
-        );
-
-    if token_owner != verified_owner.unwrap() {
+    if token_owner != get_token_owner(token_contract_hash, &token_id).unwrap() {
         runtime::revert(Error::PermissionDenied);
     }
 
