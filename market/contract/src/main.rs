@@ -142,6 +142,13 @@ fn get_bidder() -> Key {
 //     }
 // }
 
+fn get_dictionary_uref(key: &str) -> URef {
+    match runtime::get_key(key) {
+        Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
+        None => storage::new_dictionary(key).unwrap_or_revert(),
+    }
+}
+
 fn get_token_owner(token_contract_hash: ContractHash, token_id: &str) -> Option<Key> {
     runtime::call_contract::<Option<Key>>(
         token_contract_hash,
@@ -160,7 +167,6 @@ fn token_id_to_vec(token_id: &str) -> Vec<U256> {
 #[no_mangle]
 pub extern "C" fn create_listing() -> () {
     let token_owner = Key::Account(runtime::get_caller());
-
     let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
     let token_contract_hash: ContractHash = ContractHash::from_formatted_str(&token_contract_string).unwrap();
     let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
@@ -170,8 +176,6 @@ pub extern "C" fn create_listing() -> () {
         runtime::revert(Error::PermissionDenied);
     }
 
-    let listing_id: String = get_id(&token_contract_string, &token_id);
-
     let listing = Listing {
         token_contract: token_contract_hash,
         token_id: token_id.clone(),
@@ -179,6 +183,7 @@ pub extern "C" fn create_listing() -> () {
         seller: token_owner
     };
 
+    let listing_id: String = get_id(&token_contract_string, &token_id);
     let dictionary_uref = match runtime::get_key(LISTING_DICTIONARY) {
         Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
         None => storage::new_dictionary(LISTING_DICTIONARY).unwrap_or_revert(),
@@ -212,16 +217,12 @@ fn get_listing(listing_id: &str) -> (Listing, URef) {
 #[no_mangle]
 pub fn buy_listing() -> () {
     let buyer = Key::Account(runtime::get_caller());
-
     let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
     let token_contract_hash: ContractHash = ContractHash::from_formatted_str(&token_contract_string).unwrap();
-
     let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
     let token_ids: Vec<U256> = token_id_to_vec(&token_id);
-
     let listing_id: String = get_id(&token_contract_string, &token_id);
     let (listing, dictionary_uref) = get_listing(&listing_id);
-
     let buyer_purse: URef = runtime::get_named_arg(BUYER_PURSE_ARG);
     let purse_balance: U512 = system::get_purse_balance(buyer_purse).unwrap();
 
@@ -229,9 +230,11 @@ pub fn buy_listing() -> () {
         runtime::revert(Error::BalanceInsufficient);
     }
 
+    let seller = get_token_owner(token_contract_hash, &token_id).unwrap();
+
     system::transfer_from_purse_to_account(
         buyer_purse,
-        listing.seller.into_account().unwrap_or_revert(),
+        seller.into_account().unwrap_or_revert(),
         listing.price,
         None
     ).unwrap_or_revert();
@@ -240,7 +243,7 @@ pub fn buy_listing() -> () {
         token_contract_hash,
         "transfer_from",
         runtime_args! {
-            "sender" => listing.seller,
+            "sender" => seller,
             "recipient" => buyer,
             "token_ids" => token_ids,
           }
@@ -250,7 +253,7 @@ pub fn buy_listing() -> () {
 
     emit(&MarketEvent::ListingPurchased {
         package: contract_package_hash(),
-        seller: listing.seller,
+        seller: seller,
         buyer: buyer,
         token_contract: token_contract_string,
         token_id: token_id,
@@ -261,17 +264,17 @@ pub fn buy_listing() -> () {
 #[no_mangle]
 pub fn cancel_listing() -> () {
     let caller = Key::Account(runtime::get_caller());
-
     let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
+    let token_contract_hash: ContractHash = ContractHash::from_formatted_str(&token_contract_string).unwrap();
     let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
-
     let listing_id: String = get_id(&token_contract_string, &token_id);
-    let (listing, dictionary_uref) = get_listing(&listing_id);
+    let seller = get_token_owner(token_contract_hash, &token_id).unwrap();
 
-    if caller != listing.seller {
+    if caller != seller {
         runtime::revert(Error::PermissionDenied);
     }
 
+    let dictionary_uref = get_dictionary_uref(LISTING_DICTIONARY);
     storage::dictionary_put(dictionary_uref, &listing_id, None::<Listing>);
 
     emit(&MarketEvent::ListingCanceled {
