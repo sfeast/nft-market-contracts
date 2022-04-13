@@ -15,6 +15,8 @@ use alloc::{
     collections::BTreeMap
 };
 
+// use core::convert::TryInto; //for write_named_key_value
+
 use casper_contract::{
     contract_api::{runtime, storage, system},
     unwrap_or_revert::UnwrapOrRevert,
@@ -69,7 +71,8 @@ enum Error {
     PermissionDenied = 3,
     NoMatchingOffer = 4,
     OfferExists = 5,
-    OfferPurseRetrieval = 6
+    OfferPurseRetrieval = 6,
+    NeedsTransferApproval = 7
 }
 
 impl From<Error> for ApiError {
@@ -99,7 +102,6 @@ struct Listing {
 //     }
 // }
 
-// TODO: what does this do - overkill??
 fn contract_package_hash() -> ContractPackageHash {
     let call_stacks = runtime::get_call_stack();
     let last_entry = call_stacks.last().unwrap_or_revert();
@@ -111,6 +113,22 @@ fn contract_package_hash() -> ContractPackageHash {
         _ => None,
     };
     package_hash.unwrap_or_revert()
+}
+
+fn transfer_approved(token_contract_hash: ContractHash, token_id: &str, owner: Key) -> bool {
+    let approved = runtime::call_contract::<Option<Key>>(
+        token_contract_hash,
+        "get_approved",
+        runtime_args! {
+            "owner" => owner,
+            "token_id" => U256::from_dec_str(&token_id).unwrap()
+          }
+    );
+
+    contract_package_hash().value() == approved
+            .unwrap_or_revert_with(Error::NeedsTransferApproval)
+            .into_hash()
+            .unwrap()
 }
 
 fn get_id<T: CLTyped + ToBytes>(token_contract: &T, token_id: &T) -> String {
@@ -157,7 +175,9 @@ pub extern "C" fn create_listing() -> () {
         runtime::revert(Error::PermissionDenied);
     }
     
-    // TODO: check that token can be transfered by contract, otherwise listing will be in unusable state
+    if !transfer_approved(token_contract_hash, &token_id, token_owner) {
+        runtime::revert(Error::NeedsTransferApproval);
+    }
 
     let listing = Listing {
         token_contract: token_contract_hash,
