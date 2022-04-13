@@ -68,7 +68,8 @@ enum Error {
     BalanceInsufficient = 2,
     PermissionDenied = 3,
     NoMatchingOffer = 4,
-    OfferPurseRetrieval = 5
+    OfferExists = 5,
+    OfferPurseRetrieval = 6
 }
 
 impl From<Error> for ApiError {
@@ -79,14 +80,6 @@ impl From<Error> for ApiError {
 
 #[derive(CLTyped, ToBytes, FromBytes)]
 struct Listing {
-    seller: Key,
-    token_contract: ContractHash,
-    token_id: String,
-    price: U512
-}
-
-#[derive(CLTyped, ToBytes, FromBytes)]
-struct Offers {
     seller: Key,
     token_contract: ContractHash,
     token_id: String,
@@ -163,6 +156,8 @@ pub extern "C" fn create_listing() -> () {
     if token_owner != get_token_owner(token_contract_hash, &token_id).unwrap() {
         runtime::revert(Error::PermissionDenied);
     }
+    
+    // TODO: check that token can be transfered by contract, otherwise listing will be in unusable state
 
     let listing = Listing {
         token_contract: token_contract_hash,
@@ -273,25 +268,22 @@ pub fn cancel_listing() -> () {
     })
 }
 
-fn get_offers(offers_id: &str) -> (BTreeMap<Key, (U512, URef)>, URef, URef) {
+fn get_offers(offers_id: &str) -> (BTreeMap<Key, U512>, URef) {
     let dictionary_uref = match runtime::get_key(OFFER_DICTIONARY) {
         Some(uref_key) => uref_key.into_uref().unwrap_or_revert(),
         None => storage::new_dictionary(OFFER_DICTIONARY).unwrap_or_revert(),
     };
 
-    // TODO: I think we don't need to store the user purse & can just have BTreeMap<Key, U512>
-    // we can send to user account instead I believe than their purse
-    let (offers, purse): (BTreeMap<Key, (U512, URef)>, URef) =
+    let offers: BTreeMap<Key, U512> =
         match storage::dictionary_get(dictionary_uref, &offers_id)  {
             Ok(item) => match item {
-                None => (BTreeMap::new(), system::create_purse().into()),
+                None => BTreeMap::new(),
                 Some(offers) => offers,
             },
-            // Ok(current_offers) => current_offers.unwrap_or_revert(),
-            Err(_error) => (BTreeMap::new(), system::create_purse().into())
+            Err(_error) => BTreeMap::new()
         };
 
-    return (offers, purse, dictionary_uref);
+    return (offers, dictionary_uref);
 }
 
 fn get_purse(purse_name: &str) -> URef {
@@ -323,14 +315,19 @@ pub extern "C" fn make_offer() -> () {
     let bidder_purse: URef = runtime::get_named_arg(BUYER_PURSE_ARG);
     let purse_balance: U512 = system::get_purse_balance(bidder_purse).unwrap();
 
-    let (mut offers, purse, dictionary_uref): (BTreeMap<Key, (U512, URef)>, URef, URef) = get_offers(&offers_id);
+    let (mut offers, dictionary_uref): (BTreeMap<Key, U512>, URef) = get_offers(&offers_id);
     
     let offers_purse = get_purse(OFFERS_PURSE);
 
-    // TODO: if offer from this account already exists then error (only 1 offer at a time for now)
-    offers.insert(bidder, (purse_balance, bidder_purse));
+    // TODO: increase current offer instead of error
+    match offers.get(&bidder) {
+        Some(_) => runtime::revert(Error::OfferExists),
+        None => ()
+    }
+
+    offers.insert(bidder, purse_balance);
     system::transfer_from_purse_to_purse(bidder_purse, offers_purse, purse_balance, None).unwrap_or_revert();
-    storage::dictionary_put(dictionary_uref, &offers_id, (offers, purse));
+    storage::dictionary_put(dictionary_uref, &offers_id, offers);
 
     emit(&MarketEvent::OfferCreated {
         package: contract_package_hash(),
@@ -349,11 +346,10 @@ pub extern "C" fn withdraw_offer() -> () {
 
     let offers_id: String = get_id(&token_contract_string, &token_id);
 
-    let (mut offers, offer_purse, dictionary_uref):
-        (BTreeMap<Key, (U512, URef)>, URef, URef) = get_offers(&offers_id);
+    let (mut offers, dictionary_uref):
+        (BTreeMap<Key, U512>, URef) = get_offers(&offers_id);
 
-    // TODO: I think get rid of user purse storage
-    let (amount, _user_purse): (U512, URef) = offers.get(&bidder)
+    let amount: U512 = offers.get(&bidder)
         .unwrap_or_revert_with(Error::NoMatchingOffer)
         .clone();
 
@@ -367,8 +363,7 @@ pub extern "C" fn withdraw_offer() -> () {
     ).unwrap_or_revert();
 
     offers.remove(&bidder);
-    storage::dictionary_put(dictionary_uref, &offers_id, (offers, offer_purse));
-
+    storage::dictionary_put(dictionary_uref, &offers_id, offers);
 
     emit(&MarketEvent::OfferWithdraw {
         package: contract_package_hash(),
@@ -376,16 +371,6 @@ pub extern "C" fn withdraw_offer() -> () {
         token_contract: token_contract_string,
         token_id: token_id
     })
-
-    // let (offer, user_purse): (U512, URef) = offers.get(&bidder).unwrap_or_revert().clone();
-    // match (offer, user_purse) {
-    //     (Some(amount), Some(purse_ref)) => {
-    //             system::transfer_from_purse_to_purse(purse, purse_ref, amount.clone(), None);
-    //             offers.remove(&bidder);
-    //             storage::dictionary_put(dictionary_uref, &offers_id, (offers, purse));
-    //         },
-    //     _ => runtime::revert(Error::NoMatchingOffer)
-    // }
 }
 
 #[no_mangle]
@@ -404,10 +389,10 @@ pub extern "C" fn accept_offer() -> () {
         runtime::revert(Error::PermissionDenied);
     }
 
-    let (mut offers, offer_purse, dictionary_uref):
-        (BTreeMap<Key, (U512, URef)>, URef, URef) = get_offers(&offers_id);
+    let (mut offers, dictionary_uref):
+        (BTreeMap<Key, U512>, URef) = get_offers(&offers_id);
 
-    let (amount, _user_purse): (U512, URef) = offers.get(&accepted_bidder_hash)
+    let amount: U512 = offers.get(&accepted_bidder_hash)
         .unwrap_or_revert_with(Error::NoMatchingOffer)
         .clone();    
 
@@ -419,7 +404,7 @@ pub extern "C" fn accept_offer() -> () {
     ).unwrap_or_revert();
     offers.remove(&accepted_bidder_hash);
 
-    cancel_listing(); // before transfer
+    cancel_listing(); // do before transfer
   
     runtime::call_contract::<()>(
         token_contract_hash,
@@ -432,7 +417,7 @@ pub extern "C" fn accept_offer() -> () {
     );
 
     // refund the other offers
-    for (account, (bid, purse)) in &offers {
+    for (account, bid) in &offers {
         system::transfer_from_purse_to_account(
             offers_purse,
             account.into_account().unwrap_or_revert(),
@@ -442,7 +427,7 @@ pub extern "C" fn accept_offer() -> () {
     }
     offers.clear();
 
-    storage::dictionary_put(dictionary_uref, &offers_id, (offers, offer_purse));
+    storage::dictionary_put(dictionary_uref, &offers_id, offers);
 
     emit(&MarketEvent::OfferAccepted {
         package: contract_package_hash(),
