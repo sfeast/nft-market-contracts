@@ -152,10 +152,7 @@ pub extern "C" fn make_offer() -> () {
     let bidder = Key::Account(runtime::get_caller());
     let token_contract_string: String = runtime::get_named_arg(NFT_CONTRACT_HASH_ARG);
     let token_id: String = runtime::get_named_arg(TOKEN_ID_ARG);
-    // TEST: will purse transfer fail in payment contract if they don't have enough balance? then no need to worry about this
-    // let offer: U512 = runtime::get_named_arg(PRICE_ARG);
     let offers_id: String = get_id(&token_contract_string, &token_id);
-
     let bidder_purse: URef = runtime::get_named_arg(BUYER_PURSE_ARG);
     let purse_balance: U512 = system::get_purse_balance(bidder_purse).unwrap();
 
@@ -178,7 +175,7 @@ pub extern "C" fn make_offer() -> () {
         buyer: bidder,
         token_contract: token_contract_string,
         token_id: token_id,
-        price: system::get_purse_balance(offers_purse).unwrap()
+        price: purse_balance
     })
 }
 
@@ -229,8 +226,13 @@ pub extern "C" fn accept_offer() -> () {
     let offers_id: String = get_id(&token_contract_string, &token_id);
     let offers_purse = get_purse(OFFERS_PURSE);
 
+    // TODO: remove these 2 checks after adjusting error codes around cep47 errors
     if seller != get_token_owner(token_contract_hash, &token_id).unwrap() {
         runtime::revert(Error::PermissionDenied);
+    }
+    
+    if !transfer_approved(token_contract_hash, &token_id, seller) {
+        runtime::revert(Error::NeedsTransferApproval);
     }
 
     let (mut offers, dictionary_uref):

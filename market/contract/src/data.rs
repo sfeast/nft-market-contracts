@@ -13,13 +13,16 @@ use casper_contract::{
 use casper_types::{
     system::CallStackElement,
     bytesrepr::ToBytes,
-    // bytesrepr::{FromBytes, ToBytes},
     runtime_args, RuntimeArgs,
     ApiError, Key, URef, ContractHash, ContractPackageHash, CLTyped, U256, U512};
 
 use casper_types_derive::{CLTyped, FromBytes, ToBytes};
 
 // use core::convert::TryInto; //for write_named_key_value
+
+use crate::{
+    event::MarketEvent
+};
 
 /// An error enum which can be converted to a `u16` so it can be returned as an `ApiError::User`.
 #[repr(u16)]
@@ -58,13 +61,6 @@ const PRICE: &str = "price";
 
 const LISTING_DICTIONARY: &str = "listings";
 const OFFER_DICTIONARY: &str = "offers";
-
-use crate::{
-    // data::{self, Allowances, Metadata, OwnedTokens, Owners},
-    event::MarketEvent,
-    // Meta, TokenId,
-};
-
 
 pub fn contract_package_hash() -> ContractPackageHash {
     let call_stacks = runtime::get_call_stack();
@@ -159,17 +155,11 @@ pub fn get_listing_dictionary() -> URef {
     get_dictionary_uref(LISTING_DICTIONARY)
 }
 
-// use when it doesn't matter if listing exists or not
+// use when it doesn't matter if listing exists or not & no event needed
 pub fn force_cancel_listing(token_contract: &str, token_id: &str) -> () {
     let listing_id: String = get_id(&token_contract, &token_id);
     let dictionary_uref = get_dictionary_uref(LISTING_DICTIONARY);
     storage::dictionary_put(dictionary_uref, &listing_id, None::<Listing>);
-
-    emit(&MarketEvent::ListingCanceled {
-        package: contract_package_hash(),
-        token_contract: token_contract.to_string(),
-        token_id: token_id.to_string()
-    })
 }
 
 pub fn get_offers(offers_id: &str) -> (BTreeMap<Key, U512>, URef) {
