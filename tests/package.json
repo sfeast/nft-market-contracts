@@ -1,0 +1,17 @@
+{
+  "name": "casper-contracts",
+  "description": "casper-contracts-js-clients",
+  "private": true,
+  "devDependencies": {
+    "dotenv": "^10.0.0",
+    "lerna": "^4.0.0",
+    "ts-node": "^10.7.0",
+    "typescript": "^4.6.3"
+  },
+  "keywords": [],
+  "license": "ISC",
+  "dependencies": {
+    "casper-cep47-js-client": "^1.0.1",
+    "casper-js-client-helper": "^1.0.1"
+  }
+}
