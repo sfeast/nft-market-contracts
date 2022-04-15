@@ -18,8 +18,6 @@ use casper_types::{
 
 use casper_types_derive::{CLTyped, FromBytes, ToBytes};
 
-// use core::convert::TryInto; //for write_named_key_value
-
 use crate::{
     event::MarketEvent
 };
@@ -27,14 +25,14 @@ use crate::{
 /// An error enum which can be converted to a `u16` so it can be returned as an `ApiError::User`.
 #[repr(u16)]
 pub enum Error {
-    ListingDoesNotExist = 0,
-    ListingCanceledOrSold = 1,
-    BalanceInsufficient = 2,
-    PermissionDenied = 3,
-    NoMatchingOffer = 4,
-    OfferExists = 5,
-    OfferPurseRetrieval = 6,
-    NeedsTransferApproval = 7
+    ListingDoesNotExist = 1000,
+    ListingCanceledOrSold = 1001,
+    BalanceInsufficient = 1002,
+    PermissionDenied = 1003,
+    NoMatchingOffer = 1004,
+    OfferExists = 1005,
+    OfferPurseRetrieval = 1006,
+    NeedsTransferApproval = 1007
 }
 
 impl From<Error> for ApiError {
@@ -43,6 +41,7 @@ impl From<Error> for ApiError {
     }
 }
 
+// struct being used only for workaround to dictionary limitation (no remove function)
 #[derive(CLTyped, ToBytes, FromBytes)]
 pub struct Listing {
     pub seller: Key,
@@ -74,19 +73,6 @@ pub fn contract_package_hash() -> ContractPackageHash {
     };
     package_hash.unwrap_or_revert()
 }
-
-// pub fn write_named_key_value<T: CLTyped + ToBytes>(name: &str, value: T) -> () {
-//     match runtime::get_key(name) {
-//         Some(key) => {
-//             let key_ref = key.try_into().unwrap_or_revert();
-//             storage::write(key_ref, value);
-//         }
-//         None => {
-//             let key = storage::new_uref(value).into();
-//             runtime::put_key(name, key);
-//         }
-//     }
-// }
 
 pub fn transfer_approved(token_contract_hash: ContractHash, token_id: &str, owner: Key) -> bool {
     let approved = runtime::call_contract::<Option<Key>>(

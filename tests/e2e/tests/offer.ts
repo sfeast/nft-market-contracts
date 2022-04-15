@@ -22,7 +22,7 @@ const runTests = async () => {
   await marketTester.saveBalances([userKeys[1], userKeys[2], userKeys[3]]);
   await sleep(1 * 1000);
   await marketTester.makeOffer(userKeys[1], token_id, offer_amount);
-  try{await marketTester.makeOffer(userKeys[1], token_id, offer_amount);}catch(e){console.log(e)}
+  try{await marketTester.makeOffer(userKeys[1], token_id, offer_amount);}catch(e){console.log(e)} // make a 2nd offer
   await sleep(1 * 1000);
   await marketTester.makeOffer(userKeys[2], token_id, offer_amount);
   await sleep(1 * 1000);
@@ -34,7 +34,11 @@ const runTests = async () => {
   await sleep(1 * 1000);
   try{await marketTester.withdrawOffer(userKeys[2], token_id);}catch(e){console.log(e)}
   await sleep(1 * 1000);
-  try{await marketTester.acceptOffer(userKeys[6], userKeys[2], token_id);}catch(e){console.log(e)}
+  try{await marketTester.acceptOffer(userKeys[6], userKeys[2], token_id);}catch(e){console.log(e)} // no offer there
+  await sleep(1 * 1000);
+  try{await marketTester.acceptOffer(userKeys[3], userKeys[1], token_id);}catch(e){console.log(e)} // not owner
+  await sleep(1 * 1000);
+  try{await marketTester.acceptOffer(userKeys[6], userKeys[1], token_id);}catch(e){console.log(e)} // no transfer approval
   await sleep(1 * 1000);
   await nftTester.approveContractForTransfer(userKeys[6], token_id);
   await sleep(1 * 1000);

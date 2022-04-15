@@ -18,23 +18,23 @@ const runTests = async () => {
   await sleep(1 * 1000);
   await nftTester.mint(userKeys[1], token_id);
   await sleep(1 * 1000);
-  try{await marketTester.listForSale(userKeys[1], token_id, listing_price);}catch(e){console.log(e)}
+  try{await marketTester.listForSale(userKeys[1], token_id, listing_price);}catch(e){console.log(e)} // no approval yet
   await sleep(1 * 1000);
   await nftTester.approveContractForTransfer(userKeys[1], token_id);
   await sleep(1 * 1000);
-  try{await marketTester.buyListing(userKeys[6], token_id, listing_price, userKeys[1]);}catch(e){console.log(e)}
+  try{await marketTester.buyListing(userKeys[6], token_id, listing_price, userKeys[1]);}catch(e){console.log(e)} // not listed yet
   await sleep(1 * 1000);
   await marketTester.listForSale(userKeys[1], token_id, listing_price);
   await sleep(1 * 1000);
   try{await marketTester.cancelListing(userKeys[1], token_id);}catch(e){console.log(e)};
   await sleep(1 * 1000);
-  try{await marketTester.buyListing(userKeys[6], token_id, listing_price, userKeys[1]);}catch(e){console.log(e)}
+  try{await marketTester.buyListing(userKeys[6], token_id, listing_price, userKeys[1]);}catch(e){console.log(e)} // listing was cancled
   await sleep(1 * 1000);
-  try{await marketTester.listForSale(userKeys[3], token_id, listing_price);}catch(e){console.log(e)}
+  try{await marketTester.listForSale(userKeys[3], token_id, listing_price);}catch(e){console.log(e)} // not owner
   await sleep(1 * 1000);
   await marketTester.listForSale(userKeys[1], token_id, listing_price);
   await sleep(1 * 1000);
-  try{await marketTester.cancelListing(userKeys[3], token_id);}catch(e){console.log(e)};
+  try{await marketTester.cancelListing(userKeys[3], token_id);}catch(e){console.log(e)}; // not owner
   await sleep(1 * 1000);
   try{await marketTester.buyListing(userKeys[6], token_id, listing_price, userKeys[1]);}catch(e){console.log(e)}
 

@@ -23,7 +23,6 @@ use casper_types::{
     contracts::{EntryPoint, EntryPointAccess, EntryPointType, EntryPoints},
     runtime_args, RuntimeArgs, Parameter,
     Key, URef, ContractHash, CLTyped, U256, U512};
-// use casper_types::{contracts::NamedKeys};
 
 use event::{MarketEvent};
 mod event;
@@ -160,7 +159,7 @@ pub extern "C" fn make_offer() -> () {
     
     let offers_purse = get_purse(OFFERS_PURSE);
 
-    // TODO: increase current offer instead of error
+    // TODO: rebalance current offer instead of error
     match offers.get(&bidder) {
         Some(_) => runtime::revert(Error::OfferExists),
         None => ()
@@ -225,15 +224,6 @@ pub extern "C" fn accept_offer() -> () {
     let accepted_bidder_hash: Key = Key::from_formatted_str(&offer_account_hash).unwrap();
     let offers_id: String = get_id(&token_contract_string, &token_id);
     let offers_purse = get_purse(OFFERS_PURSE);
-
-    // TODO: remove these 2 checks after adjusting error codes around cep47 errors
-    if seller != get_token_owner(token_contract_hash, &token_id).unwrap() {
-        runtime::revert(Error::PermissionDenied);
-    }
-    
-    if !transfer_approved(token_contract_hash, &token_id, seller) {
-        runtime::revert(Error::NeedsTransferApproval);
-    }
 
     let (mut offers, dictionary_uref):
         (BTreeMap<Key, U512>, URef) = get_offers(&offers_id);
