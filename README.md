@@ -9,7 +9,7 @@ See the Tests section below for easy installation & testing.
 
 # Tests
 
-Contains unit tests based on the casper-contracts-js-clients project. The cep47 JS tests were turned into class methods & similar was done for the market & payment contracts in this repo. These classes can now be used to run sequential calls against your contracts as well as query their data.
+Contains unit tests based on the casper-contracts-js-clients project. The cep47 JS tests were turned into class methods & similar was done for the market & payment contracts in this repo. These classes can now be used to run calls against your contracts as well as query their data.
 
 ### Setup
 
@@ -34,7 +34,7 @@ Full examples of the tests are in /e2e/tests, but as a quick example they look s
 ```
 where the last line is wrapped in try/catch since we know it will error as the item wasn't listed before trying to buy it. Wrapping it allows more tests to be placed after it.
 
-You can run as many tests sequentially as you'd like, using loops, control statements, etc. Currently there are no examples of querying data from the test files but you can also add that there or modify the test classes.
+You can run as many tests as you'd like, using JS logic for whatever situations you'd like to simulate & data to query. Currently of querying data are hard coded in the test classes for the relevant information for each function.
 
 ## How to run
 
