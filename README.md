@@ -1,10 +1,19 @@
+# Contracts
+There are 2 contracts included:
+- market: this includes nft market functionality: list, cancel, buy + offer, withdraw, acceptOffer
+- payment: this is a small contract that is to be installed on the user's end as a mechanism to transfer payment to your contract. This is for security purposes.
+
+To use the market contract you must install it & then make deployments to it's entry points either from a client or contract. It works with the standard cep47 contract implemented by the Casper team here https://github.com/casper-ecosystem/casper-nft-cep47 so it expects that the cep47 contract it interacts with will have the various cep47 entry points following the cep47 standard.
+
+See the Tests section below for easy installation & testing.
+
 # Tests
 
 Contains unit tests based on the casper-contracts-js-clients project. The cep47 JS tests were turned into class methods & similar was done for the market & payment contracts in this repo. These classes can now be used to run sequential calls against your contracts as well as query their data.
 
 ### Setup
 
-Before running the examples, you should copy the `.env.example.nctl` file, rename as "env.test.nctl" & input all the environment variables.
+Before running the examples, you should copy the `.env.example.nctl` file, rename as "env.test.nctl" & input all the environment variables. Note that this also expects you have setup NCTL properly on your development local machine https://docs.casperlabs.io/dapp-dev-guide/setup-nctl/
 
 Next before running any tests you'll need to install the contracts (market & cep47). You can do that by running the install scripts like so:
 `ts-node ./e2e/cep47/install.ts`
