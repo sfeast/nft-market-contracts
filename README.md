@@ -3,7 +3,7 @@ There are 2 contracts included:
 - market: this includes nft market functionality: list, cancel, buy + offer, withdraw, acceptOffer
 - payment: this is a small contract that is to be installed on the user's end as a mechanism to transfer payment to your contract. This is for security purposes.
 
-To use the market contract you must install it & then make deployments to it's entry points either from a client or contract. It works with the standard cep47 contract implemented by the Casper team here https://github.com/casper-ecosystem/casper-nft-cep47 so it expects that the cep47 contract it interacts with will have the various cep47 entry points following the cep47 standard.
+To use the market contract you must install it & then make deployments to it's entry points either from a client or contract. It works with standard cep47 contracts implemented by the Casper team here https://github.com/casper-ecosystem/casper-nft-cep47 so it expects that the cep47 contracts it interacts with will have the various cep47 entry points following the cep47 standard.
 
 See the Tests section below for easy installation & testing.
 
